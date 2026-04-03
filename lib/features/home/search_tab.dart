@@ -6,13 +6,21 @@ import '../../widgets/mobile_book_card.dart';
 class SearchTab extends StatefulWidget {
   final List<Book> books;
   final Set<String> checkedOutBookIds;
+  final Set<String> favoriteBookIds;
   final Function(Book) onCheckout;
+
+  /// Async callback so the book card / details sheet can show a loading state.
+  final Future<void> Function(String bookId) onToggleFavorite;
+  final Future<void> Function() onRefresh;
 
   const SearchTab({
     super.key,
     required this.books,
     required this.checkedOutBookIds,
+    required this.favoriteBookIds,
     required this.onCheckout,
+    required this.onToggleFavorite,
+    required this.onRefresh,
   });
 
   @override
@@ -51,12 +59,14 @@ class _SearchTabState extends State<SearchTab> {
       builder: (_) => BookDetailsSheet(
         book: book,
         isCheckedOut: widget.checkedOutBookIds.contains(book.id),
-        isFavorite: false,
+        isFavorite: widget.favoriteBookIds.contains(book.id),
         onCheckout: () {
           Navigator.pop(context);
           widget.onCheckout(book);
         },
-        onToggleFavorite: () {},
+        // Wrap so the sheet's internal state drives the animation,
+        // and the parent state is updated via onToggleFavorite.
+        onToggleFavorite: () => widget.onToggleFavorite(book.id),
       ),
     );
   }
@@ -103,6 +113,13 @@ class _SearchTabState extends State<SearchTab> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Search Books'),
+        actions: [
+          IconButton(
+            onPressed: widget.onRefresh,
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Refresh',
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -151,58 +168,71 @@ class _SearchTabState extends State<SearchTab> {
             ),
           ),
           Expanded(
-            child: filtered.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+            child: RefreshIndicator(
+              onRefresh: widget.onRefresh,
+              child: filtered.isEmpty
+                  ? ListView(
                       children: [
-                        Icon(
-                          Icons.search_off,
-                          size: 64,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.3),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No books found',
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withValues(alpha: 0.6),
+                        SizedBox(
+                          height: MediaQuery.of(context).size.height * 0.5,
+                          child: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.search_off,
+                                  size: 64,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withValues(alpha: 0.3),
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'No books found',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withValues(alpha: 0.6),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                TextButton(
+                                  onPressed: () => setState(() {
+                                    _searchQuery = '';
+                                    _selectedCategory = 'All';
+                                  }),
+                                  child: const Text('Clear filters'),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        TextButton(
-                          onPressed: () => setState(() {
-                            _searchQuery = '';
-                            _selectedCategory = 'All';
-                          }),
-                          child: const Text('Clear filters'),
-                        ),
                       ],
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: filtered.length,
+                      itemBuilder: (context, index) {
+                        final book = filtered[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: MobileBookCard(
+                            book: book,
+                            isCheckedOut:
+                                widget.checkedOutBookIds.contains(book.id),
+                            isFavorite:
+                                widget.favoriteBookIds.contains(book.id),
+                            onTap: () => _showBookDetails(book),
+                            onToggleFavorite: () =>
+                                widget.onToggleFavorite(book.id),
+                          ),
+                        );
+                      },
                     ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: filtered.length,
-                    itemBuilder: (context, index) {
-                      final book = filtered[index];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: MobileBookCard(
-                          book: book,
-                          isCheckedOut:
-                              widget.checkedOutBookIds.contains(book.id),
-                          isFavorite: false,
-                          onTap: () => _showBookDetails(book),
-                        ),
-                      );
-                    },
-                  ),
+            ),
           ),
         ],
       ),

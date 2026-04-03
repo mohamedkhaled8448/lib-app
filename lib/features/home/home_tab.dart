@@ -11,7 +11,8 @@ class HomeTab extends StatelessWidget {
   final Set<String> checkedOutBookIds;
   final Set<String> favoriteBookIds;
   final Function(Book) onCheckout;
-  final Function(String) onToggleFavorite;
+  final Future<void> Function(String) onToggleFavorite;
+  final Future<void> Function() onRefresh;
 
   const HomeTab({
     super.key,
@@ -21,6 +22,7 @@ class HomeTab extends StatelessWidget {
     required this.favoriteBookIds,
     required this.onCheckout,
     required this.onToggleFavorite,
+    required this.onRefresh,
   });
 
   void _showBookDetails(BuildContext context, Book book) {
@@ -36,66 +38,107 @@ class HomeTab extends StatelessWidget {
           Navigator.pop(context);
           onCheckout(book);
         },
+        // Returns a Future so the sheet can show its own loading state.
         onToggleFavorite: () => onToggleFavorite(book.id),
       ),
     );
   }
 
-  List<Book> _getRecommendedBooks() {
+  @override
+  Widget build(BuildContext context) {
+    if (books.isEmpty) {
+      return Scaffold(
+        body: SafeArea(
+          child: RefreshIndicator(
+            onRefresh: onRefresh,
+            child: const CustomScrollView(
+              slivers: [
+                SliverFillRemaining(
+                  child: Center(child: Text('No books available.')),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final usedIds = <String>{};
+
+    // --- 1. Top Rated ---
+    final topRated = books
+        .where((b) => b.rating > 0 && !usedIds.contains(b.id))
+        .toList()
+      ..sort((a, b) => b.rating.compareTo(a.rating));
+    final topRatedList = topRated.take(5).toList();
+    usedIds.addAll(topRatedList.map((b) => b.id));
+
+    // --- 2. Popular Now ---
+    final popular = books
+        .where((b) =>
+            b.availableCopies > 0 &&
+            b.availableCopies < b.totalCopies &&
+            !usedIds.contains(b.id))
+        .toList();
+    popular.shuffle();
+    final popularList = popular.take(4).toList();
+    usedIds.addAll(popularList.map((b) => b.id));
+
+    // --- 3. Recommended for You ---
     final userCategories = <String>{};
     for (final bookId in [...checkedOutBookIds, ...favoriteBookIds]) {
-      final book =
-          books.firstWhere((b) => b.id == bookId, orElse: () => books.first);
-      userCategories.add(book.category);
+      try {
+        final book = books.firstWhere((b) => b.id == bookId);
+        userCategories.add(book.category);
+      } catch (_) {}
     }
 
-    if (userCategories.isEmpty) {
-      return ([...books]..sort((a, b) => b.rating.compareTo(a.rating)))
-          .take(4)
-          .toList();
-    }
-
-    final recommendations = books.where((book) {
+    var recommendedList = books.where((book) {
       return userCategories.contains(book.category) &&
           !checkedOutBookIds.contains(book.id) &&
           !favoriteBookIds.contains(book.id) &&
+          !usedIds.contains(book.id) &&
           book.isAvailable;
-    }).toList()
-      ..sort((a, b) => b.rating.compareTo(a.rating));
+    }).toList();
+    recommendedList.shuffle();
 
-    if (recommendations.length < 4) {
-      final others = books.where((book) {
+    if (recommendedList.length < 4) {
+      var others = books.where((book) {
         return !checkedOutBookIds.contains(book.id) &&
             !favoriteBookIds.contains(book.id) &&
+            !usedIds.contains(book.id) &&
             book.isAvailable &&
-            !recommendations.contains(book);
-      }).toList()
-        ..sort((a, b) => b.rating.compareTo(a.rating));
-      recommendations.addAll(others.take(4 - recommendations.length));
+            !recommendedList.contains(book);
+      }).toList();
+      others.shuffle();
+      recommendedList.addAll(others.take(4 - recommendedList.length));
     }
 
-    return recommendations.take(4).toList();
-  }
+    if (recommendedList.isEmpty) {
+      var fallback = books
+          .where((b) => !usedIds.contains(b.id))
+          .toList()
+        ..sort((a, b) => b.rating.compareTo(a.rating));
+      recommendedList = fallback.take(4).toList();
+    } else {
+      recommendedList = recommendedList.take(4).toList();
+    }
+    usedIds.addAll(recommendedList.map((b) => b.id));
 
-  @override
-  Widget build(BuildContext context) {
-    final topRated = ([...books]..sort((a, b) => b.rating.compareTo(a.rating)))
-        .take(5)
-        .toList();
-    final popular = books
-        .where((b) => b.availableCopies > 0 && b.availableCopies < 3)
-        .take(4)
-        .toList();
-    final recent = ([...books]
-          ..sort((a, b) => b.publishYear.compareTo(a.publishYear)))
-        .take(4)
-        .toList();
-    final recommended = _getRecommendedBooks();
+    // --- 4. Recent Additions ---
+    final recent = books
+        .where((b) => !usedIds.contains(b.id))
+        .toList()
+      ..sort((a, b) => b.publishYear.compareTo(a.publishYear));
+    final recentList = recent.take(4).toList();
+    usedIds.addAll(recentList.map((b) => b.id));
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       body: SafeArea(
-        child: CustomScrollView(
+        child: RefreshIndicator(
+          onRefresh: onRefresh,
+          child: CustomScrollView(
           slivers: [
             // Header
             SliverToBoxAdapter(
@@ -133,6 +176,11 @@ class HomeTab extends StatelessWidget {
                           ),
                         ],
                       ),
+                    ),
+                    IconButton(
+                      onPressed: onRefresh,
+                      icon: const Icon(Icons.refresh_rounded),
+                      tooltip: 'Refresh',
                     ),
                     if (checkedOutBookIds.isNotEmpty)
                       Badge(
@@ -208,17 +256,17 @@ class HomeTab extends StatelessWidget {
 
             _buildSectionHeader(
                 context, Icons.star, Colors.amber.shade700, 'Top Rated'),
-            _buildBookList(context, topRated),
+            _buildBookList(context, topRatedList),
 
-            if (popular.isNotEmpty) ...[
+            if (popularList.isNotEmpty) ...[
               _buildSectionHeader(context, Icons.local_fire_department,
                   Colors.orange.shade700, 'Popular Now'),
-              _buildBookList(context, popular),
+              _buildBookList(context, popularList),
             ],
 
             _buildSectionHeader(context, Icons.recommend, Colors.blue.shade700,
                 'Recommended for You'),
-            _buildBookList(context, recommended),
+            _buildBookList(context, recommendedList),
 
             _buildSectionHeader(context, Icons.schedule, Colors.green.shade700,
                 'Recent Additions'),
@@ -229,18 +277,21 @@ class HomeTab extends StatelessWidget {
                   (context, index) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: MobileBookCard(
-                      book: recent[index],
+                      book: recentList[index],
                       isCheckedOut:
-                          checkedOutBookIds.contains(recent[index].id),
-                      isFavorite: favoriteBookIds.contains(recent[index].id),
-                      onTap: () => _showBookDetails(context, recent[index]),
+                          checkedOutBookIds.contains(recentList[index].id),
+                      isFavorite: favoriteBookIds.contains(recentList[index].id),
+                      onTap: () => _showBookDetails(context, recentList[index]),
+                      onToggleFavorite: () =>
+                          onToggleFavorite(recentList[index].id),
                     ),
                   ),
-                  childCount: recent.length,
+                  childCount: recentList.length,
                 ),
               ),
             ),
           ],
+        ),
         ),
       ),
     );
@@ -277,6 +328,7 @@ class HomeTab extends StatelessWidget {
               isCheckedOut: checkedOutBookIds.contains(bookList[index].id),
               isFavorite: favoriteBookIds.contains(bookList[index].id),
               onTap: () => _showBookDetails(context, bookList[index]),
+              onToggleFavorite: () => onToggleFavorite(bookList[index].id),
             ),
           ),
           childCount: bookList.length,

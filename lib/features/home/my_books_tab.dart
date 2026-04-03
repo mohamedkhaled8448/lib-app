@@ -6,11 +6,13 @@ import '../../widgets/book_details_sheet.dart';
 class MyBooksTab extends StatelessWidget {
   final List<Book> checkedOutBooks;
   final Function(String) onReturn;
+  final Future<void> Function() onRefresh;
 
   const MyBooksTab({
     super.key,
     required this.checkedOutBooks,
     required this.onReturn,
+    required this.onRefresh,
   });
 
   String get _dueDate {
@@ -28,7 +30,8 @@ class MyBooksTab extends StatelessWidget {
         isCheckedOut: true,
         isFavorite: false,
         onCheckout: () {},
-        onToggleFavorite: () {},
+        // MyBooksTab does not manage favorites, so this is a no-op.
+        onToggleFavorite: () async {},
       ),
     );
   }
@@ -38,63 +41,82 @@ class MyBooksTab extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('My Books')),
-      body: checkedOutBooks.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+      appBar: AppBar(
+        title: const Text('My Books'),
+        actions: [
+          IconButton(
+            onPressed: onRefresh,
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Refresh',
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: onRefresh,
+        child: checkedOutBooks.isEmpty
+            ? ListView(
                 children: [
-                  Icon(
-                    Icons.book_outlined,
-                    size: 80,
-                    color: colorScheme.onSurface.withValues(alpha: 0.3),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'No books checked out',
-                    style:
-                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Start exploring our catalog to find\nyour next great read!',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: colorScheme.onSurface.withValues(alpha: 0.6),
+                  SizedBox(
+                    height: MediaQuery.of(context).size.height * 0.6,
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.book_outlined,
+                            size: 80,
+                            color: colorScheme.onSurface.withValues(alpha: 0.3),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'No books checked out',
+                            style:
+                                TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Start exploring our catalog to find\nyour next great read!',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: colorScheme.onSurface.withValues(alpha: 0.6),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
-              ),
-            )
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('My Books',
+              )
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('My Books',
+                            style: TextStyle(
+                                fontSize: 24, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${checkedOutBooks.length} book${checkedOutBooks.length != 1 ? 's' : ''} checked out',
                           style: TextStyle(
-                              fontSize: 24, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${checkedOutBooks.length} book${checkedOutBooks.length != 1 ? 's' : ''} checked out',
-                        style: TextStyle(
-                          color: colorScheme.onSurface.withValues(alpha: 0.6),
+                            color: colorScheme.onSurface.withValues(alpha: 0.6),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                ...checkedOutBooks.map((book) => _BookCard(
-                      book: book,
-                      dueDate: _dueDate,
-                      onTap: () => _showBookDetails(context, book),
-                      onReturn: () => onReturn(book.id),
-                    )),
-              ],
-            ),
+                  ...checkedOutBooks.map((book) => _BookCard(
+                        book: book,
+                        dueDate: _dueDate,
+                        onTap: () => _showBookDetails(context, book),
+                        onReturn: () => onReturn(book.id),
+                      )),
+                ],
+              ),
+      ),
     );
   }
 }

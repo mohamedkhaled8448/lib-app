@@ -1,47 +1,51 @@
+// lib/models/user.dart
+
 class User {
   final String id;
   final String name;
   final String email;
   final DateTime memberSince;
-  final String? token;
 
   const User({
     required this.id,
     required this.name,
     required this.email,
     required this.memberSince,
-    this.token,
   });
 
   String get initials {
-    return name
-        .split(' ')
-        .map((n) => n.isNotEmpty ? n[0] : '')
-        .join('')
-        .toUpperCase();
+    final parts = name.trim().split(' ').where((n) => n.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts[0][0].toUpperCase();
+    return (parts.first[0] + parts.last[0]).toUpperCase();
   }
 
-  String get firstName => name.split(' ').first;
+  String get firstName => name.trim().split(' ').first;
 
+  /// Receives the nested 'user' sub-object from the API response:
+  /// { "id"/"_id": "...", "name": "...", "email": "...", "memberSince": "..." }
   factory User.fromJson(Map<String, dynamic> json) {
+    // Support both 'id' (REST) and '_id' (MongoDB raw)
+    final id = json['id']?.toString() ??
+        json['_id']?.toString() ??
+        json['userId']?.toString() ??
+        '';
+
     return User(
-      id: json['id']?.toString() ?? '',
-      name: json['name']?.toString() ?? '',
-      email: json['email']?.toString() ?? '',
+      id: id,
+      name: json['name']?.toString() ?? json['Name']?.toString() ?? '',
+      email: json['email']?.toString() ?? json['Email']?.toString() ?? '',
       memberSince:
           DateTime.tryParse(json['memberSince']?.toString() ?? '') ??
+              DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
               DateTime.now(),
-      token: json['token']?.toString(),
     );
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'name': name,
-      'email': email,
-      'memberSince': memberSince.toIso8601String(),
-      'token': token,
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'email': email,
+        'memberSince': memberSince.toIso8601String(),
+      };
 }

@@ -5,10 +5,13 @@ import '../../core/api/api_service.dart';
 import '../../models/book.dart';
 import '../../providers/user_provider.dart';
 import '../../providers/book_provider.dart';
+import '../../services/favorite_service.dart';
 import 'home_tab.dart';
 import 'search_tab.dart';
 import 'my_books_tab.dart';
 import '../profile/profile_tab.dart';
+import '../rooms/rooms_tab.dart';
+import '../../providers/room_provider.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -27,10 +30,21 @@ class _MainScreenState extends State<MainScreen> {
   final Set<String> _checkedOutBookIds = {};
   final Set<String> _favoriteBookIds = {};
 
+  /// Books whose favorite toggle is currently being processed.
+  /// Prevents duplicate rapid taps from firing multiple API calls.
+  final Set<String> _processingFavoriteIds = {};
+
   @override
   void initState() {
     super.initState();
     _loadBooks();
+    
+    // Load local mock rooms
+    Future.microtask(() {
+      if (mounted) {
+        context.read<RoomProvider>().loadMockRooms();
+      }
+    });
   }
 
   Future<void> _loadBooks() async {
@@ -136,14 +150,80 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  void _toggleFavorite(String bookId) {
+  Future<void> _toggleFavorite(String bookId) async {
+    // Prevent duplicate concurrent actions on the same book.
+    if (_processingFavoriteIds.contains(bookId)) return;
+
+    final wasFavorite = _favoriteBookIds.contains(bookId);
+
+    // 1. Mark as processing & update UI instantly (optimistic update).
     setState(() {
-      if (_favoriteBookIds.contains(bookId)) {
+      _processingFavoriteIds.add(bookId);
+      if (wasFavorite) {
         _favoriteBookIds.remove(bookId);
       } else {
         _favoriteBookIds.add(bookId);
       }
     });
+
+    try {
+      if (wasFavorite) {
+        await FavoriteService.removeFavorite(
+          bookId: bookId,
+          favoriteIds: _favoriteBookIds,
+        );
+      } else {
+        await FavoriteService.addFavorite(
+          bookId: bookId,
+          favoriteIds: _favoriteBookIds,
+        );
+      }
+
+      if (mounted) {
+        final message = wasFavorite ? 'Removed from favorites' : 'Added to favorites';
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(
+                    wasFavorite ? Icons.star_border : Icons.star,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(message),
+                ],
+              ),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+      }
+    } catch (e) {
+      // Rollback optimistic update on failure.
+      if (mounted) {
+        setState(() {
+          if (wasFavorite) {
+            _favoriteBookIds.add(bookId);
+          } else {
+            _favoriteBookIds.remove(bookId);
+          }
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Could not update favorites. Please try again.'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _processingFavoriteIds.remove(bookId));
+      }
+    }
   }
 
   Widget _buildBody() {
@@ -197,19 +277,26 @@ class _MainScreenState extends State<MainScreen> {
         favoriteBookIds: _favoriteBookIds,
         onCheckout: _checkoutBook,
         onToggleFavorite: _toggleFavorite,
+        onRefresh: _loadBooks,
       ),
       SearchTab(
         books: _books,
         checkedOutBookIds: _checkedOutBookIds,
+        favoriteBookIds: _favoriteBookIds,
         onCheckout: _checkoutBook,
+        onToggleFavorite: _toggleFavorite,
+        onRefresh: _loadBooks,
       ),
       MyBooksTab(
         checkedOutBooks: _checkedOutBooks,
         onReturn: _returnBook,
+        onRefresh: _loadBooks,
       ),
+      const RoomsTab(),
       ProfileTab(
         user: userProvider.currentUser!,
         checkedOutCount: _checkedOutBookIds.length,
+        onRefresh: _loadBooks,
       ),
     ];
 
@@ -243,6 +330,11 @@ class _MainScreenState extends State<MainScreen> {
                   icon: Icon(Icons.book_outlined),
                   activeIcon: Icon(Icons.book),
                   label: 'My Books',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.meeting_room_outlined),
+                  activeIcon: Icon(Icons.meeting_room),
+                  label: 'Rooms',
                 ),
                 BottomNavigationBarItem(
                   icon: Icon(Icons.person_outline),

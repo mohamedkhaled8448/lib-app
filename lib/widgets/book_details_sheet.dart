@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import '../models/book.dart';
 
-class BookDetailsSheet extends StatelessWidget {
+class BookDetailsSheet extends StatefulWidget {
   final Book book;
   final bool isCheckedOut;
   final bool isFavorite;
   final VoidCallback onCheckout;
-  final VoidCallback onToggleFavorite;
+
+  /// Called when user taps the favorite button.
+  /// The callback receives the bookId.  Using a Future allows the sheet
+  /// to show a loading indicator while the operation completes.
+  final Future<void> Function() onToggleFavorite;
 
   const BookDetailsSheet({
     super.key,
@@ -16,6 +20,65 @@ class BookDetailsSheet extends StatelessWidget {
     required this.onCheckout,
     required this.onToggleFavorite,
   });
+
+  @override
+  State<BookDetailsSheet> createState() => _BookDetailsSheetState();
+}
+
+class _BookDetailsSheetState extends State<BookDetailsSheet>
+    with SingleTickerProviderStateMixin {
+  late bool _isFavorite;
+  bool _isProcessing = false;
+
+  /// Animation controller for the star scale bounce.
+  late AnimationController _animController;
+  late Animation<double> _scaleAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _isFavorite = widget.isFavorite;
+
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _scaleAnim = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.4), weight: 50),
+      TweenSequenceItem(tween: Tween(begin: 1.4, end: 1.0), weight: 50),
+    ]).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
+  }
+
+  @override
+  void dispose() {
+    _animController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleToggleFavorite() async {
+    if (_isProcessing) return;
+
+    setState(() {
+      _isProcessing = true;
+      _isFavorite = !_isFavorite; // Optimistic update
+    });
+
+    // Play bounce animation
+    _animController.forward(from: 0.0);
+
+    try {
+      await widget.onToggleFavorite();
+    } catch (_) {
+      // Revert optimistic update on error
+      if (mounted) {
+        setState(() => _isFavorite = !_isFavorite);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessing = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,15 +121,46 @@ class BookDetailsSheet extends StatelessWidget {
                     ),
                     Row(
                       children: [
-                        IconButton(
-                          icon: Icon(
-                            isFavorite
-                                ? Icons.favorite
-                                : Icons.favorite_border,
-                            color: isFavorite ? Colors.red : null,
+                        // ── Animated Favorite Button ──────────────────────
+                        ScaleTransition(
+                          scale: _scaleAnim,
+                          child: IconButton(
+                            tooltip: _isFavorite
+                                ? 'Remove from favorites'
+                                : 'Add to favorites',
+                            // Disable the tap target while processing
+                            onPressed:
+                                _isProcessing ? null : _handleToggleFavorite,
+                            icon: _isProcessing
+                                ? SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: colorScheme.primary,
+                                    ),
+                                  )
+                                : AnimatedSwitcher(
+                                    duration:
+                                        const Duration(milliseconds: 200),
+                                    transitionBuilder: (child, anim) =>
+                                        ScaleTransition(
+                                            scale: anim, child: child),
+                                    child: Icon(
+                                      _isFavorite
+                                          ? Icons.star
+                                          : Icons.star_border,
+                                      key: ValueKey(_isFavorite),
+                                      color: _isFavorite
+                                          ? Colors.amber.shade600
+                                          : colorScheme.onSurface
+                                              .withValues(alpha: 0.6),
+                                      size: 28,
+                                    ),
+                                  ),
                           ),
-                          onPressed: onToggleFavorite,
                         ),
+                        // ─────────────────────────────────────────────────
                         IconButton(
                           icon: const Icon(Icons.close),
                           onPressed: () => Navigator.pop(context),
@@ -101,7 +195,7 @@ class BookDetailsSheet extends StatelessWidget {
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(12),
                           child: Image.network(
-                            book.coverImage,
+                            widget.book.coverImage,
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => Container(
                               color: colorScheme.surfaceContainerHighest,
@@ -119,14 +213,14 @@ class BookDetailsSheet extends StatelessWidget {
                     const SizedBox(height: 24),
 
                     Text(
-                      book.title,
+                      widget.book.title,
                       style: const TextStyle(
                           fontSize: 24, fontWeight: FontWeight.bold),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      book.author,
+                      widget.book.author,
                       style: TextStyle(
                           fontSize: 16,
                           color: colorScheme.onSurface.withValues(alpha: 0.6)),
@@ -141,13 +235,13 @@ class BookDetailsSheet extends StatelessWidget {
                       runSpacing: 8,
                       children: [
                         Chip(
-                          label: Text(book.category),
+                          label: Text(widget.book.category),
                           backgroundColor: colorScheme.primaryContainer,
                         ),
                         Chip(
                           avatar: const Icon(Icons.star,
                               color: Colors.amber, size: 16),
-                          label: Text('${book.rating} / 5.0'),
+                          label: Text('${widget.book.rating} / 5.0'),
                         ),
                       ],
                     ),
@@ -167,21 +261,21 @@ class BookDetailsSheet extends StatelessWidget {
                           _InfoRow(
                             icon: Icons.calendar_today,
                             label: 'Published',
-                            value: book.publishYear.toString(),
+                            value: widget.book.publishYear.toString(),
                           ),
                           const SizedBox(height: 12),
                           _InfoRow(
                             icon: Icons.numbers,
                             label: 'ISBN',
-                            value: book.isbn,
+                            value: widget.book.isbn,
                           ),
                           const SizedBox(height: 12),
                           _InfoRow(
                             icon: Icons.book,
                             label: 'Availability',
                             value:
-                                '${book.availableCopies} of ${book.totalCopies} available',
-                            valueColor: book.isAvailable
+                                '${widget.book.availableCopies} of ${widget.book.totalCopies} available',
+                            valueColor: widget.book.isAvailable
                                 ? Colors.green
                                 : colorScheme.error,
                           ),
@@ -198,7 +292,7 @@ class BookDetailsSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      book.description,
+                      widget.book.description,
                       style: TextStyle(
                         color:
                             colorScheme.onSurface.withValues(alpha: 0.7),
@@ -226,16 +320,16 @@ class BookDetailsSheet extends StatelessWidget {
                   child: SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: isCheckedOut || !book.isAvailable
+                      onPressed: widget.isCheckedOut || !widget.book.isAvailable
                           ? null
-                          : onCheckout,
+                          : widget.onCheckout,
                       style: ElevatedButton.styleFrom(
                           padding:
                               const EdgeInsets.symmetric(vertical: 16)),
                       child: Text(
-                        isCheckedOut
+                        widget.isCheckedOut
                             ? 'Already Checked Out'
-                            : book.isAvailable
+                            : widget.book.isAvailable
                                 ? 'Checkout Book'
                                 : 'Currently Unavailable',
                       ),
